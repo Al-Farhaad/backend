@@ -1,172 +1,163 @@
-const nodemailer = require("nodemailer");
-const dns = require("dns").promises;
-const net = require("net");
+const RESEND_API_BASE_URL = process.env.RESEND_API_BASE_URL || "https://api.resend.com";
+const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+const RESEND_FROM = process.env.RESEND_FROM || "Frishta <onboarding@resend.dev>";
+const RESEND_REPLY_TO = process.env.RESEND_REPLY_TO || "";
 
-const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
-const SMTP_SECURE = process.env.SMTP_SECURE === "true" || SMTP_PORT === 465;
-const SMTP_HOST = process.env.SMTP_HOST;
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
-const SMTP_CONNECTION_TIMEOUT = Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 15000);
-const SMTP_GREETING_TIMEOUT = Number(process.env.SMTP_GREETING_TIMEOUT_MS || 15000);
-const SMTP_SOCKET_TIMEOUT = Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20000);
-const SMTP_FORCE_IPV4 = process.env.SMTP_FORCE_IPV4 !== "false";
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
-function makeTransport({ host, port, secure, tlsServername }) {
-  const tls = tlsServername ? { servername: tlsServername } : undefined;
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure,
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS
+function toArray(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (!value) return [];
+  return [value];
+}
+
+async function sendResendEmail({ to, subject, text, html }) {
+  if (!RESEND_API_KEY) {
+    throw new Error("RESEND_API_KEY is not set");
+  }
+
+  if (typeof fetch !== "function") {
+    throw new Error("Global fetch is not available in this Node runtime");
+  }
+
+  const payload = {
+    from: RESEND_FROM,
+    to: toArray(to),
+    subject,
+    text,
+    html
+  };
+
+  if (RESEND_REPLY_TO) {
+    payload.reply_to = RESEND_REPLY_TO;
+  }
+
+  const response = await fetch(`${RESEND_API_BASE_URL.replace(/\/+$/, "")}/emails`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json"
     },
-    connectionTimeout: SMTP_CONNECTION_TIMEOUT,
-    greetingTimeout: SMTP_GREETING_TIMEOUT,
-    socketTimeout: SMTP_SOCKET_TIMEOUT,
-    tls
+    body: JSON.stringify(payload)
+  });
+
+  const raw = await response.text();
+  let data = null;
+  try {
+    data = raw ? JSON.parse(raw) : null;
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    const message =
+      data?.message ||
+      data?.error ||
+      (Array.isArray(data?.errors) && data.errors.length > 0 ? data.errors[0]?.message : "") ||
+      `Resend API request failed (${response.status})`;
+    throw new Error(message);
+  }
+
+  return data;
+}
+
+function buildSongsText(songs) {
+  const matchedSongs = Array.isArray(songs) ? songs : [];
+  if (matchedSongs.length === 0) {
+    return ["No songs available yet for your selected categories."];
+  }
+
+  return matchedSongs.map((song, index) => {
+    const title = song?.title || "Untitled";
+    const category = song?.category || "Unknown Category";
+    const url = song?.audioUrl || song?.audioPath || "";
+    return `${index + 1}. ${title} [${category}]${url ? `\n   ${url}` : ""}`;
   });
 }
 
-function isConnectionTimeout(error) {
-  const message = String(error?.message || "").toLowerCase();
-  return error?.code === "ETIMEDOUT" || message.includes("connection timeout");
-}
-
-function isNetworkUnreachable(error) {
-  const message = String(error?.message || "").toLowerCase();
-  return error?.code === "ENETUNREACH" || message.includes("enetunreach") || message.includes("network is unreachable");
-}
-
-function isRetryableNetworkError(error) {
-  return isConnectionTimeout(error) || isNetworkUnreachable(error);
-}
-
-function shouldTryGmailFallback(error, primaryConfig) {
-  return (
-    isRetryableNetworkError(error) &&
-    String(primaryConfig.host || "").toLowerCase() === "smtp.gmail.com" &&
-    Number(primaryConfig.port) === 587 &&
-    primaryConfig.secure === false
-  );
-}
-
-async function getPrimaryTargets(primaryConfig) {
-  const host = String(primaryConfig.host || "").trim();
-  if (!host || !SMTP_FORCE_IPV4 || net.isIP(host)) {
-    return [{ ...primaryConfig }];
+function buildSongsHtml(songs) {
+  const matchedSongs = Array.isArray(songs) ? songs : [];
+  if (matchedSongs.length === 0) {
+    return "<li>No songs available yet for your selected categories.</li>";
   }
 
-  try {
-    const ipv4List = await dns.resolve4(host);
-    if (!Array.isArray(ipv4List) || ipv4List.length === 0) {
-      return [{ ...primaryConfig }];
-    }
-
-    return ipv4List.map((ipv4) => ({
-      ...primaryConfig,
-      host: ipv4,
-      tlsServername: host
-    }));
-  } catch {
-    return [{ ...primaryConfig }];
-  }
-}
-
-async function trySendWithTargets(targets, mailOptions) {
-  let lastError;
-  for (const target of targets) {
-    try {
-      const transport = makeTransport(target);
-      return await transport.sendMail(mailOptions);
-    } catch (error) {
-      lastError = error;
-      if (!isRetryableNetworkError(error)) {
-        throw error;
+  return matchedSongs
+    .map((song) => {
+      const title = escapeHtml(song?.title || "Untitled");
+      const category = escapeHtml(song?.category || "Unknown Category");
+      const url = song?.audioUrl || song?.audioPath || "";
+      if (!url) {
+        return `<li><strong>${title}</strong> <em>[${category}]</em></li>`;
       }
-    }
-  }
-  throw lastError;
-}
-
-async function sendMailWithFallback(mailOptions) {
-  const primaryConfig = {
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_SECURE
-  };
-
-  try {
-    const primaryTargets = await getPrimaryTargets(primaryConfig);
-    return await trySendWithTargets(primaryTargets, mailOptions);
-  } catch (error) {
-    if (!shouldTryGmailFallback(error, primaryConfig)) {
-      throw error;
-    }
-
-    const fallbackConfig = {
-      host: SMTP_HOST,
-      port: 465,
-      secure: true
-    };
-
-    const fallbackTargets = await getPrimaryTargets(fallbackConfig);
-    return trySendWithTargets(fallbackTargets, mailOptions);
-  }
+      const safeUrl = escapeHtml(url);
+      return `<li><strong>${title}</strong> <em>[${category}]</em> - <a href="${safeUrl}">Listen</a></li>`;
+    })
+    .join("");
 }
 
 async function sendOtpEmail(to, otp) {
-  await sendMailWithFallback({
-    from: process.env.SMTP_FROM,
+  const expiryMinutes = Number(process.env.OTP_EXPIRY_MINUTES || 10);
+  const safeOtp = escapeHtml(otp);
+
+  await sendResendEmail({
     to,
     subject: "Frishta Email Verification OTP",
-    text: `Your Frishta OTP is ${otp}. It expires in ${process.env.OTP_EXPIRY_MINUTES} minutes.`
+    text: `Your Frishta OTP is ${otp}. It expires in ${expiryMinutes} minutes.`,
+    html: [
+      "<div style=\"font-family:Arial,sans-serif;line-height:1.5\">",
+      "<h2>Frishta Email Verification</h2>",
+      `<p>Your OTP is:</p><p style="font-size:24px;font-weight:700;letter-spacing:2px">${safeOtp}</p>`,
+      `<p>This OTP expires in ${expiryMinutes} minutes.</p>`,
+      "<p>If you did not request this, you can ignore this email.</p>",
+      "</div>"
+    ].join("")
   });
 }
 
 async function sendWelcomeEmail({ to, fullName, categories, songs }) {
   const userName = fullName || "Frishta User";
   const selectedCategories = Array.isArray(categories) ? categories : [];
-  const matchedSongs = Array.isArray(songs) ? songs : [];
+  const songLines = buildSongsText(songs);
+  const songsHtml = buildSongsHtml(songs);
 
-  const attachmentLines = [
-    `Welcome to Frishta, ${userName}!`,
-    "",
-    "Your selected categories:",
-    ...selectedCategories.map((category) => `- ${category}`),
-    "",
-    "Songs for your categories:"
-  ];
-
-  if (matchedSongs.length === 0) {
-    attachmentLines.push("- No songs available yet for selected categories.");
-  } else {
-    matchedSongs.forEach((song, index) => {
-      attachmentLines.push(`${index + 1}. ${song.title} [${song.category}]`);
-      attachmentLines.push(`   ${song.audioUrl}`);
-    });
-  }
-
-  await sendMailWithFallback({
-    from: process.env.SMTP_FROM,
+  await sendResendEmail({
     to,
     subject: "Welcome to Frishta - Your Category Songs",
     text: [
       `Hi ${userName},`,
       "",
       "Your account is verified successfully.",
-      "We have attached your category-based song links file.",
+      "",
+      "Your selected categories:",
+      ...(selectedCategories.length > 0
+        ? selectedCategories.map((category) => `- ${category}`)
+        : ["- None selected"]),
+      "",
+      "Songs for your categories:",
+      ...songLines,
       "",
       "Enjoy your music journey with Frishta."
     ].join("\n"),
-    attachments: [
-      {
-        filename: "frishta-category-songs.txt",
-        content: attachmentLines.join("\n"),
-        contentType: "text/plain"
-      }
-    ]
+    html: [
+      "<div style=\"font-family:Arial,sans-serif;line-height:1.5\">",
+      `<h2>Welcome to Frishta, ${escapeHtml(userName)}!</h2>`,
+      "<p>Your account is verified successfully.</p>",
+      "<h3>Your selected categories</h3>",
+      selectedCategories.length > 0
+        ? `<ul>${selectedCategories.map((category) => `<li>${escapeHtml(category)}</li>`).join("")}</ul>`
+        : "<p>None selected.</p>",
+      "<h3>Suggested songs for you</h3>",
+      `<ol>${songsHtml}</ol>`,
+      "<p>Enjoy your music journey with Frishta.</p>",
+      "</div>"
+    ].join("")
   });
 }
 
