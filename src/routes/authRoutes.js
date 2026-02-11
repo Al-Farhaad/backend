@@ -110,8 +110,24 @@ router.post("/register/start", async (req, res) => {
       { upsert: true, returnDocument: "after" }
     );
 
-    await sendOtpEmail(normalizedEmail, otp);
-    res.json({ message: "OTP sent to email" });
+    const payload = {
+      message: "OTP generated. Please check your email.",
+      emailQueued: true
+    };
+
+    if (process.env.EXPOSE_OTP_IN_RESPONSE === "true") {
+      payload.otp = otp;
+    }
+
+    res.json(payload);
+
+    sendOtpEmail(normalizedEmail, otp)
+      .then(() => {
+        console.log(`OTP email sent to ${normalizedEmail}`);
+      })
+      .catch((error) => {
+        console.error(`OTP email failed for ${normalizedEmail}:`, error?.message || error);
+      });
   } catch (e) {
     res.status(500).json({ message: "Server error", error: e.message });
   }
@@ -161,6 +177,55 @@ router.post("/register/verify", async (req, res) => {
     }
 
     res.json({ message: "Email verified. You can now login." });
+  } catch (e) {
+    res.status(500).json({ message: "Server error", error: e.message });
+  }
+});
+
+router.post("/register/resend", async (req, res) => {
+  try {
+    const normalizedEmail = (req.body?.email || "").toLowerCase().trim();
+    if (!normalizedEmail) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    const user = await User.findOne({ email: normalizedEmail });
+    if (!user) {
+      return res.status(404).json({ message: "User not found. Please register first." });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(400).json({ message: "Email is already verified" });
+    }
+
+    const otp = randomOtp();
+    const otpHash = hashOtp(otp, process.env.OTP_PEPPER);
+    const expiresAt = new Date(Date.now() + Number(process.env.OTP_EXPIRY_MINUTES || 10) * 60 * 1000);
+
+    await OtpCode.findOneAndUpdate(
+      { email: normalizedEmail },
+      { otpHash, expiresAt, attempts: 0 },
+      { upsert: true, returnDocument: "after" }
+    );
+
+    const payload = {
+      message: "New OTP generated. Please check your email.",
+      emailQueued: true
+    };
+
+    if (process.env.EXPOSE_OTP_IN_RESPONSE === "true") {
+      payload.otp = otp;
+    }
+
+    res.json(payload);
+
+    sendOtpEmail(normalizedEmail, otp)
+      .then(() => {
+        console.log(`Resend OTP email sent to ${normalizedEmail}`);
+      })
+      .catch((error) => {
+        console.error(`Resend OTP email failed for ${normalizedEmail}:`, error?.message || error);
+      });
   } catch (e) {
     res.status(500).json({ message: "Server error", error: e.message });
   }
