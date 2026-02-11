@@ -2,6 +2,7 @@ const RESEND_API_BASE_URL = process.env.RESEND_API_BASE_URL || "https://api.rese
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const RESEND_FROM = process.env.RESEND_FROM || "Frishta <onboarding@resend.dev>";
 const RESEND_REPLY_TO = process.env.RESEND_REPLY_TO || "";
+const APP_DEEP_LINK_BASE = process.env.APP_DEEP_LINK_BASE || "frishta://song";
 
 function escapeHtml(value) {
   return String(value || "")
@@ -16,6 +17,13 @@ function toArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean);
   if (!value) return [];
   return [value];
+}
+
+function getAppSongLink(song) {
+  const songId = String(song?.id || "").trim();
+  if (!songId) return "";
+  const base = APP_DEEP_LINK_BASE.replace(/\/+$/, "");
+  return `${base}/${encodeURIComponent(songId)}`;
 }
 
 async function sendResendEmail({ to, subject, text, html }) {
@@ -77,8 +85,12 @@ function buildSongsText(songs) {
   return matchedSongs.map((song, index) => {
     const title = song?.title || "Untitled";
     const category = song?.category || "Unknown Category";
-    const url = song?.audioUrl || song?.audioPath || "";
-    return `${index + 1}. ${title} [${category}]${url ? `\n   ${url}` : ""}`;
+    const appUrl = getAppSongLink(song);
+    const webUrl = song?.audioUrl || song?.audioPath || "";
+    const lines = [`${index + 1}. ${title} [${category}]`];
+    if (appUrl) lines.push(`   Open in app: ${appUrl}`);
+    if (webUrl) lines.push(`   Direct audio: ${webUrl}`);
+    return lines.join("\n");
   });
 }
 
@@ -92,12 +104,21 @@ function buildSongsHtml(songs) {
     .map((song) => {
       const title = escapeHtml(song?.title || "Untitled");
       const category = escapeHtml(song?.category || "Unknown Category");
-      const url = song?.audioUrl || song?.audioPath || "";
-      if (!url) {
+      const appUrl = getAppSongLink(song);
+      const webUrl = song?.audioUrl || song?.audioPath || "";
+      if (!appUrl && !webUrl) {
         return `<li><strong>${title}</strong> <em>[${category}]</em></li>`;
       }
-      const safeUrl = escapeHtml(url);
-      return `<li><strong>${title}</strong> <em>[${category}]</em> - <a href="${safeUrl}">Listen</a></li>`;
+
+      const links = [];
+      if (appUrl) {
+        links.push(`<a href="${escapeHtml(appUrl)}">Open in app</a>`);
+      }
+      if (webUrl) {
+        links.push(`<a href="${escapeHtml(webUrl)}">Direct audio</a>`);
+      }
+
+      return `<li><strong>${title}</strong> <em>[${category}]</em> - ${links.join(" | ")}</li>`;
     })
     .join("");
 }
