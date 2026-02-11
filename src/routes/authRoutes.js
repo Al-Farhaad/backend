@@ -97,7 +97,7 @@ router.post("/register/start", async (req, res) => {
         passwordSalt: salt,
         isEmailVerified: false
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: "after" }
     );
 
     const otp = randomOtp();
@@ -107,7 +107,7 @@ router.post("/register/start", async (req, res) => {
     await OtpCode.findOneAndUpdate(
       { email: normalizedEmail },
       { otpHash, expiresAt, attempts: 0 },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: "after" }
     );
 
     await sendOtpEmail(normalizedEmail, otp);
@@ -137,7 +137,7 @@ router.post("/register/verify", async (req, res) => {
     const user = await User.findOneAndUpdate(
       { email: normalizedEmail },
       { isEmailVerified: true },
-      { new: true }
+      { returnDocument: "after" }
     );
 
     if (!user) return res.status(404).json({ message: "User not found" });
