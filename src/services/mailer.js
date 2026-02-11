@@ -2,25 +2,70 @@ const nodemailer = require("nodemailer");
 
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_SECURE = process.env.SMTP_SECURE === "true" || SMTP_PORT === 465;
+const SMTP_HOST = process.env.SMTP_HOST;
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const SMTP_CONNECTION_TIMEOUT = Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 15000);
+const SMTP_GREETING_TIMEOUT = Number(process.env.SMTP_GREETING_TIMEOUT_MS || 15000);
+const SMTP_SOCKET_TIMEOUT = Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20000);
 
-function makeTransport() {
+function makeTransport({ host, port, secure }) {
   return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_SECURE,
+    host,
+    port,
+    secure,
     auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS
+      user: SMTP_USER,
+      pass: SMTP_PASS
     },
-    connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 10000),
-    greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 10000),
-    socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 15000)
+    connectionTimeout: SMTP_CONNECTION_TIMEOUT,
+    greetingTimeout: SMTP_GREETING_TIMEOUT,
+    socketTimeout: SMTP_SOCKET_TIMEOUT
   });
 }
 
+function isConnectionTimeout(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return error?.code === "ETIMEDOUT" || message.includes("connection timeout");
+}
+
+function shouldTryGmailFallback(error, primaryConfig) {
+  return (
+    isConnectionTimeout(error) &&
+    String(primaryConfig.host || "").toLowerCase() === "smtp.gmail.com" &&
+    Number(primaryConfig.port) === 587 &&
+    primaryConfig.secure === false
+  );
+}
+
+async function sendMailWithFallback(mailOptions) {
+  const primaryConfig = {
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_SECURE
+  };
+
+  try {
+    const transport = makeTransport(primaryConfig);
+    return await transport.sendMail(mailOptions);
+  } catch (error) {
+    if (!shouldTryGmailFallback(error, primaryConfig)) {
+      throw error;
+    }
+
+    const fallbackConfig = {
+      host: SMTP_HOST,
+      port: 465,
+      secure: true
+    };
+
+    const fallbackTransport = makeTransport(fallbackConfig);
+    return fallbackTransport.sendMail(mailOptions);
+  }
+}
+
 async function sendOtpEmail(to, otp) {
-  const transport = makeTransport();
-  await transport.sendMail({
+  await sendMailWithFallback({
     from: process.env.SMTP_FROM,
     to,
     subject: "Frishta Email Verification OTP",
@@ -29,7 +74,6 @@ async function sendOtpEmail(to, otp) {
 }
 
 async function sendWelcomeEmail({ to, fullName, categories, songs }) {
-  const transport = makeTransport();
   const userName = fullName || "Frishta User";
   const selectedCategories = Array.isArray(categories) ? categories : [];
   const matchedSongs = Array.isArray(songs) ? songs : [];
@@ -52,7 +96,7 @@ async function sendWelcomeEmail({ to, fullName, categories, songs }) {
     });
   }
 
-  await transport.sendMail({
+  await sendMailWithFallback({
     from: process.env.SMTP_FROM,
     to,
     subject: "Welcome to Frishta - Your Category Songs",
