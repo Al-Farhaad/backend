@@ -3,7 +3,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const RESEND_FROM = process.env.RESEND_FROM || "Frishta <onboarding@resend.dev>";
 const RESEND_REPLY_TO = process.env.RESEND_REPLY_TO || "";
 const APP_DEEP_LINK_BASE = process.env.APP_DEEP_LINK_BASE || "frishta://song";
-
+     
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")

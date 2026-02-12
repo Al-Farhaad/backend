@@ -44,21 +44,71 @@ async function readCategoryOverrides(publicDir) {
   }
 }
 
-function resolveCategoryForSong(songFile, index, categoryOverrides) {
-  const byFileName = categoryOverrides[songFile];
-  const byBaseName = categoryOverrides[path.parse(songFile).name];
-  const candidate = byFileName ?? byBaseName;
+function getOverrideForSong(songFile, categoryOverrides) {
+  return categoryOverrides[songFile] ?? categoryOverrides[path.parse(songFile).name] ?? null;
+}
 
-  if (typeof candidate === "string" && MUSIC_CATEGORIES.includes(candidate)) {
-    return candidate;
+function normalizeThumbnailPath(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const normalized = trimmed.replace(/\\/g, "/");
+  if (normalized.startsWith("/media/")) return normalized;
+  if (normalized.startsWith("media/")) return `/${normalized}`;
+
+  const fileName = normalized.split("/").filter(Boolean).pop();
+  if (!fileName) return "";
+  return toMediaPath("thumbnails", fileName);
+}
+
+function resolveCategoryForSong(songFile, index, categoryOverrides) {
+  const candidate = getOverrideForSong(songFile, categoryOverrides);
+  const categoryCandidate = typeof candidate === "object" && candidate ? candidate.category : candidate;
+
+  if (typeof categoryCandidate === "string" && MUSIC_CATEGORIES.includes(categoryCandidate)) {
+    return categoryCandidate;
   }
 
-  if (Array.isArray(candidate)) {
-    const match = candidate.find((item) => MUSIC_CATEGORIES.includes(item));
+  if (Array.isArray(categoryCandidate)) {
+    const match = categoryCandidate.find((item) => MUSIC_CATEGORIES.includes(item));
     if (match) return match;
   }
 
   return MUSIC_CATEGORIES[index % MUSIC_CATEGORIES.length];
+}
+
+function resolveThumbnailPathForSong(songFile, index, thumbnailFiles, categoryOverrides) {
+  const candidate = getOverrideForSong(songFile, categoryOverrides);
+
+  if (typeof candidate === "object" && candidate) {
+    const overrideThumbnailPath =
+      normalizeThumbnailPath(
+        candidate.thumbnailPath ||
+          candidate.thumbnail ||
+          candidate.thumbnailFile ||
+          candidate.imagePath ||
+          candidate.image
+      ) || "";
+
+    if (overrideThumbnailPath) {
+      return overrideThumbnailPath;
+    }
+  }
+
+  const songBaseName = path.parse(songFile).name.toLowerCase();
+  const sameNameMatch = thumbnailFiles.find(
+    (thumbnailFile) => path.parse(thumbnailFile).name.toLowerCase() === songBaseName
+  );
+  if (sameNameMatch) {
+    return toMediaPath("thumbnails", sameNameMatch);
+  }
+
+  if (process.env.SONG_THUMBNAIL_FALLBACK_INDEX === "true" && thumbnailFiles.length > 0) {
+    return toMediaPath("thumbnails", thumbnailFiles[index % thumbnailFiles.length]);
+  }
+
+  return null;
 }
 
 async function getSongCatalog({ baseUrl = "" } = {}) {
@@ -73,10 +123,9 @@ async function getSongCatalog({ baseUrl = "" } = {}) {
   ]);
 
   return songFiles.map((songFile, index) => {
-    const thumbnailFile = thumbnailFiles.length > 0 ? thumbnailFiles[index % thumbnailFiles.length] : null;
     const category = resolveCategoryForSong(songFile, index, categoryOverrides);
     const audioPath = toMediaPath("songs", songFile);
-    const thumbnailPath = thumbnailFile ? toMediaPath("thumbnails", thumbnailFile) : null;
+    const thumbnailPath = resolveThumbnailPathForSong(songFile, index, thumbnailFiles, categoryOverrides);
 
     return {
       id: `song-${index + 1}`,
