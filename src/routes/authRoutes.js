@@ -19,6 +19,21 @@ const router = express.Router();
 const GENDERS = new Set(["male", "female", "other"]);
 const PHONE_REGEX = /^[+\d][\d\s-]{6,19}$/;
 
+function normalizeCategoryKey(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+}
+
+const CATEGORY_LOOKUP = new Map(
+  MUSIC_CATEGORIES.map((category) => [normalizeCategoryKey(category), category])
+);
+
+function canonicalizeCategory(value) {
+  return CATEGORY_LOOKUP.get(normalizeCategoryKey(value)) || null;
+}
+
 router.post("/register/start", async (req, res) => {
   try {
     const {
@@ -59,9 +74,15 @@ router.post("/register/start", async (req, res) => {
       return res.status(400).json({ message: "Country and state are required" });
     }
 
-    const normalizedCategories = Array.isArray(categories)
-      ? categories.map((category) => String(category).trim()).filter(Boolean)
+    const canonicalizedCategories = Array.isArray(categories)
+      ? categories.map((category) => canonicalizeCategory(category))
       : [];
+
+    const normalizedCategories = canonicalizedCategories.filter(Boolean);
+
+    if (canonicalizedCategories.some((category) => !category)) {
+      return res.status(400).json({ message: "One or more categories are invalid" });
+    }
 
     if (normalizedCategories.length !== 3) {
       return res.status(400).json({ message: "Please select exactly 3 categories" });
@@ -69,11 +90,6 @@ router.post("/register/start", async (req, res) => {
 
     if (new Set(normalizedCategories).size !== normalizedCategories.length) {
       return res.status(400).json({ message: "Duplicate categories are not allowed" });
-    }
-
-    const validCategories = normalizedCategories.every((category) => MUSIC_CATEGORIES.includes(category));
-    if (!validCategories) {
-      return res.status(400).json({ message: "One or more categories are invalid" });
     }
 
     const normalizedEmail = email.toLowerCase().trim();
@@ -163,13 +179,23 @@ router.post("/register/verify", async (req, res) => {
     try {
       const baseUrl = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`;
       const catalog = await getSongCatalog({ baseUrl });
-      const selected = new Set(Array.isArray(user.categories) ? user.categories : []);
-      const songsForUser = catalog.filter((song) => selected.has(song.category));
+      const rawSelectedCategories = Array.isArray(user.categories)
+        ? user.categories.map((category) => String(category || "").trim()).filter(Boolean)
+        : [];
+      const canonicalSelectedCategories = rawSelectedCategories
+        .map((category) => canonicalizeCategory(category))
+        .filter(Boolean);
+      const selectedCategories =
+        canonicalSelectedCategories.length > 0 ? canonicalSelectedCategories : rawSelectedCategories;
+      const selectedKeys = new Set(selectedCategories.map((category) => normalizeCategoryKey(category)));
+      const songsForUser = catalog.filter((song) => {
+        return selectedKeys.has(normalizeCategoryKey(song.category));
+      });
 
       await sendWelcomeEmail({
         to: user.email,
         fullName: user.fullName,
-        categories: user.categories,
+        categories: selectedCategories,
         songs: songsForUser
       });
     } catch (emailError) {
