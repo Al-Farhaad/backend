@@ -4,15 +4,15 @@
     "thumbnailPath": "/media/thumbnails/5.png"
   },
   "ACHHA_HAI_Video_Song_SOMESH_MATHUR.mp3": {
-    "category": "HINDI POP",
+    "category": "HINDUSTANI POP ROCK",
     "thumbnailPath": "/media/thumbnails/4.png"
   },
   "AND_TIME_STOOD_STILL.mp3": {
-    "category": "GLOBAL-WORLD MUSIC",
+    "category": "ROCK FUSION",
     "thumbnailPath": "/media/thumbnails/3.png"
   },
   "DIL_E_NADAN.mp3": {
-    "category": "ENGLISH POP",
+    "category": "GHAZAL",
     "thumbnailPath": "/media/thumbnails/1.png"
   },
   "Darbari_Hum_Aum_Asato_Maa.mp3": {
@@ -28,11 +28,11 @@
     "thumbnailPath": "/media/thumbnails/14.png"
   },
   "SUFI_SOJOURN_TIME_STOOD_STILL.mp3": {
-    "category": "SUFI POETRY",
+    "category": "SUFI KALAAM",
     "thumbnailPath": "/media/thumbnails/2.png"
   },
   "VIDUSHI SUDHA MATHUR_I_Raag_Alhaiya_Bilawal.mp3": {
-    "category": "HINDUSTANI CLASSICAL VOCAL",
+    "category": "HINDUSTANI CLASSICAL INSTRUMENTAL",
     "thumbnailPath": "/media/thumbnails/13.png"
   },
   "Violin_Melody_M_S_Gopalakrishnan_Carnatic_Classical_Instrumental.mp3": {
@@ -40,15 +40,15 @@
     "thumbnailPath": "/media/thumbnails/13.png"
   },
   "WARM_MIST_OF_TEARS_Somesh_Mathur_Teaser.mp3": {
-    "category": "JAZZ",
+    "category": "ENGLISH POP",
     "thumbnailPath": "/media/thumbnails/6.png"
   },
   "WHATS_WITH_THE_WORLD.mp3": {
-    "category": "ROCK N ROLL",
+    "category": "GLOBAL- WORLD MUSIC",
     "thumbnailPath": "/media/thumbnails/9.png"
   },
   "WHEN_YOU'RE_HAPPY.mp3": {
-    "category": "GHAZAL",
+    "category": "JAZZ FUSION",
     "thumbnailPath": "/media/thumbnails/10.png"
   }
 }
